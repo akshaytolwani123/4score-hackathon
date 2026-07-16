@@ -20,7 +20,7 @@ For API-only development, run `cd backend && uv sync && uv run uvicorn app.main:
 
 ## Roles
 
-- Visitors can browse the directory, jobs, and events.
+- Visitors can browse the directory, jobs, and events; signing in lets them submit a short in-app application for any job.
 - Pending alumni can finish their profile but must be verified by an admin before they can contact people or submit content.
 - Verified alumni can see alumni email addresses, send connection requests, publish jobs, and submit events.
 - Admins verify alumni and moderate events.

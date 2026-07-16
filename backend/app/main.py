@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -60,6 +60,16 @@ class Job(PostBase, Base):
     company: Mapped[str] = mapped_column(String(120))
     location: Mapped[str] = mapped_column(String(120))
     apply_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class JobApplication(Base):
+    __tablename__ = "job_applications"
+    __table_args__ = (UniqueConstraint("job_id", "applicant_id", name="uq_job_application_applicant"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    applicant_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Event(PostBase, Base):
@@ -115,6 +125,10 @@ class PostIn(BaseModel):
     apply_url: str | None = None
     starts_at: datetime | None = None
     venue: str | None = None
+
+
+class JobApplicationIn(BaseModel):
+    message: str = Field(min_length=10, max_length=2000)
 
 
 class DonationIn(BaseModel):
@@ -215,6 +229,7 @@ def startup():
 @app.get("/health")
 def health(): return {"ok": True}
 
+
 @app.get("/auth/{provider}")
 async def login(provider: Literal["google", "microsoft"], request: Request):
     client = oauth.create_client(provider)
@@ -275,6 +290,17 @@ def create_job(data: PostIn, db: Session = Depends(get_db), user: User = Depends
     if not data.company or not data.location: raise HTTPException(422, "Company and location are required")
     item = Job(title=data.title, description=data.description, company=data.company, location=data.location, apply_url=data.apply_url, author_id=user.id)
     db.add(item); db.commit(); return {"id": item.id}
+
+
+@app.post("/jobs/{job_id}/applications")
+def apply_for_job(job_id: int, data: JobApplicationIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if not db.get(Job, job_id):
+        raise HTTPException(404, "Job not found")
+    if db.scalar(select(JobApplication.id).where(JobApplication.job_id == job_id, JobApplication.applicant_id == user.id)):
+        raise HTTPException(409, "You have already applied for this job")
+    application = JobApplication(job_id=job_id, applicant_id=user.id, message=data.message)
+    db.add(application); db.commit()
+    return {"id": application.id, "status": "submitted"}
 
 
 @app.get("/events")
