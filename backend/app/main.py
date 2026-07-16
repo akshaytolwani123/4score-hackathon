@@ -51,7 +51,6 @@ class PostBase:
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(180))
     description: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="pending")
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -65,6 +64,7 @@ class Job(PostBase, Base):
 
 class Event(PostBase, Base):
     __tablename__ = "events"
+    status: Mapped[str] = mapped_column(String(20), default="pending")
     starts_at: Mapped[datetime] = mapped_column(DateTime)
     venue: Mapped[str] = mapped_column(String(180))
 
@@ -205,8 +205,8 @@ def startup():
         ]
         db.add_all([admin, *alumni]); db.flush()
         db.add_all([
-            Job(title="Backend Engineer", description="Help build reliable data products with a supportive alumni team.", company="Nimbus Systems", location="Bengaluru / Hybrid", author_id=admin.id, status="approved", apply_url="https://example.com/jobs"),
-            Job(title="Product Design Intern", description="A paid summer internship for students who love thoughtful product craft.", company="Fictional Labs", location="Mumbai", author_id=admin.id, status="approved"),
+            Job(title="Backend Engineer", description="Help build reliable data products with a supportive alumni team.", company="Nimbus Systems", location="Bengaluru / Hybrid", author_id=admin.id, apply_url="https://example.com/jobs"),
+            Job(title="Product Design Intern", description="A paid summer internship for students who love thoughtful product craft.", company="Fictional Labs", location="Mumbai", author_id=admin.id),
             Event(title="TSEC Alumni Homecoming 2026", description="Reconnect with classmates, mentors, and the next generation of TSEC builders.", venue="TSEC Campus, Bandra", starts_at=datetime(2026, 8, 22, 17, 0), author_id=admin.id, status="approved"),
         ])
         db.commit()
@@ -268,13 +268,13 @@ def alumni(q: str = "", branch: str = "", year: int | None = None, db: Session =
 
 
 @app.get("/jobs")
-def jobs(db: Session = Depends(get_db)): return [{"id": x.id, "title": x.title, "description": x.description, "company": x.company, "location": x.location, "apply_url": x.apply_url, "status": x.status} for x in db.scalars(select(Job).where(Job.status == "approved").order_by(Job.created_at.desc())).all()]
+def jobs(db: Session = Depends(get_db)): return [{"id": x.id, "title": x.title, "description": x.description, "company": x.company, "location": x.location, "apply_url": x.apply_url} for x in db.scalars(select(Job).order_by(Job.created_at.desc())).all()]
 
 @app.post("/jobs")
 def create_job(data: PostIn, db: Session = Depends(get_db), user: User = Depends(verified_user)):
     if not data.company or not data.location: raise HTTPException(422, "Company and location are required")
     item = Job(title=data.title, description=data.description, company=data.company, location=data.location, apply_url=data.apply_url, author_id=user.id)
-    db.add(item); db.commit(); return {"id": item.id, "status": item.status}
+    db.add(item); db.commit(); return {"id": item.id}
 
 
 @app.get("/events")
@@ -354,18 +354,29 @@ def verify_donation(data: PaymentVerificationIn, db: Session = Depends(get_db)):
 
 @app.get("/admin/pending")
 def pending(db: Session = Depends(get_db), _: User = Depends(admin_user)):
-    return {"users": [public_user(x) for x in db.scalars(select(User).where(User.role == "pending")).all()], "jobs": [{"id": x.id, "title": x.title, "status": x.status} for x in db.scalars(select(Job).where(Job.status == "pending")).all()], "events": [{"id": x.id, "title": x.title, "status": x.status} for x in db.scalars(select(Event).where(Event.status == "pending")).all()]}
+    users = db.scalars(select(User).where(User.role == "pending").order_by(User.created_at.desc())).all()
+    events = db.scalars(select(Event).where(Event.status == "pending").order_by(Event.starts_at)).all()
+    return {
+        "users": [{"id": x.id, "name": x.name, "email": x.email, "graduation_year": x.graduation_year,
+                   "branch": x.branch, "company": x.company, "title": x.title, "location": x.location,
+                   "bio": x.bio, "skills": x.skills, "linkedin": x.linkedin, "created_at": x.created_at} for x in users],
+        "events": [{"id": x.id, "title": x.title, "description": x.description, "venue": x.venue,
+                    "starts_at": x.starts_at, "created_at": x.created_at,
+                    "author": {"id": author.id, "name": author.name, "email": author.email} if (author := db.get(User, x.author_id)) else None} for x in events],
+    }
 
 
-@app.post("/admin/users/{user_id}/verify")
-def verify_user(user_id: int, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+@app.post("/admin/users/{user_id}/{decision}")
+def review_user(user_id: int, decision: Literal["verified", "rejected"], db: Session = Depends(get_db), _: User = Depends(admin_user)):
     target = db.get(User, user_id)
     if not target: raise HTTPException(404, "User not found")
-    target.role = "verified"; db.commit(); return public_user(target, target)
+    if target.role != "pending": raise HTTPException(409, "Only pending alumni can be reviewed")
+    target.role = decision; db.commit(); return public_user(target, target)
 
 
-@app.post("/admin/{kind}/{item_id}/{decision}")
-def moderate(kind: Literal["jobs", "events"], item_id: int, decision: Literal["approved", "rejected"], db: Session = Depends(get_db), _: User = Depends(admin_user)):
-    item = db.get(Job if kind == "jobs" else Event, item_id)
+@app.post("/admin/events/{item_id}/{decision}")
+def moderate_event(item_id: int, decision: Literal["approved", "rejected"], db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    item = db.get(Event, item_id)
     if not item: raise HTTPException(404, "Item not found")
+    if item.status != "pending": raise HTTPException(409, "Only pending events can be reviewed")
     item.status = decision; db.commit(); return {"id": item.id, "status": item.status}

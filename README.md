@@ -22,5 +22,5 @@ For API-only development, run `cd backend && uv sync && uv run uvicorn app.main:
 
 - Visitors can browse the directory, jobs, and events.
 - Pending alumni can finish their profile but must be verified by an admin before they can contact people or submit content.
-- Verified alumni can see alumni email addresses, send connection requests, and submit jobs/events.
-- Admins verify alumni and moderate jobs/events.
+- Verified alumni can see alumni email addresses, send connection requests, publish jobs, and submit events.
+- Admins verify alumni and moderate events.
