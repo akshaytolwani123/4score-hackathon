@@ -1,0 +1,20 @@
+[project]
+name = "tsec-alumni-api"
+version = "0.1.0"
+description = "FastAPI service for TSEC Alumni Connect"
+requires-python = ">=3.12"
+dependencies = [
+  "authlib==1.3.2",
+  "email-validator==2.2.0",
+  "fastapi==0.115.6",
+  "httpx==0.28.1",
+  "itsdangerous==2.2.0",
+  "psycopg[binary]==3.2.3",
+  "python-dotenv==1.0.1",
+  "razorpay==1.4.2",
+  "sqlalchemy==2.0.36",
+  "uvicorn[standard]==0.34.0",
+]
+
+[tool.uv]
+package = false
